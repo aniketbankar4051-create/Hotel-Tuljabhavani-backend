@@ -1,36 +1,62 @@
 const express = require("express");
 const cors = require("cors");
+const bcrypt = require("bcrypt");
+const db = require("./db"); // single DB import
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
+/* ================= MIDDLEWARE ================= */
 app.use(cors());
 app.use(express.json());
 
-// Database
-require("./db");
+/* ================= ENSURE DEFAULT USERS ================= */
+async function ensureDefaultUsers() {
+  const passwordHash = await bcrypt.hash("123456", 10);
 
-// Routes
-const tablesRoute = require("./routes/tables");
-const menuRoute = require("./routes/menu");
-const ordersRoute = require("./routes/orders");
-const revenueRoute = require("./routes/revenue");
-const authRoute = require("./routes/auth");
-const excelRoute = require("./routes/excel");
-app.use("/api/excel", excelRoute);
-app.use("/api/auth", authRoute);
-app.use("/api/orders", ordersRoute);
-app.use("/api/tables", tablesRoute);
-app.use("/api/menu", menuRoute);
-app.use("/api/revenue", revenueRoute);
+  const users = [
+    { username: "owner", role: "OWNER" },
+    { username: "waiter", role: "WAITER" },
+  ];
 
-// Test route
-app.get("/", (req, res) => {
-  res.send("Hotel TULJABHAVANI Backend Running");
-});
+  for (const user of users) {
+    const [rows] = await db.query(
+      "SELECT id FROM users WHERE username = ?",
+      [user.username]
+    );
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+    if (rows.length === 0) {
+      await db.query(
+        "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+        [user.username, passwordHash, user.role]
+      );
+      console.log(`✅ Created user: ${user.username}`);
+    } else {
+      await db.query(
+        "UPDATE users SET password = ? WHERE username = ?",
+        [passwordHash, user.username]
+      );
+      console.log(`🔁 Reset password for: ${user.username}`);
+    }
+  }
+}
+
+/* ================= ROUTES ================= */
+app.use("/api/tables", require("./routes/tables"));
+app.use("/api/menu", require("./routes/menu"));
+app.use("/api/orders", require("./routes/orders"));
+app.use("/api/revenue", require("./routes/revenue"));
+app.use("/api/auth", require("./routes/auth"));
+app.use("/api/excel", require("./routes/excel"));
+
+/* ================= START SERVER ================= */
+app.listen(PORT, async () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+
+  try {
+    await ensureDefaultUsers();
+    console.log("👤 Default users ensured");
+  } catch (err) {
+    console.error("❌ Error ensuring users:", err.message);
+  }
 });
